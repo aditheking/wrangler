@@ -203,6 +203,10 @@ fragment TIME_UNIT
     | ('h'|'H')          // h
     | ('d'|'D')          // d
     ;
+fragment Digit : [0-9] ;
+fragment IntegerPattern : ('+' | '-')? Digit+ ;
+fragment FloatPattern : IntegerPattern '.' Digit+ ;
+fragment NumberPattern : FloatPattern | IntegerPattern ;
 
 /*
  * Following are the Lexer Rules used for tokenizing the recipe.
@@ -267,13 +271,8 @@ Number
  ;
 
 // Re-add BYTE_SIZE and TIME_DURATION lexer rules AFTER Number
-BYTE_SIZE
-    : Number [ \t]* ( BYTE_UNIT ('B'|'b')? | ('B'|'b') )
-    ;
-
-TIME_DURATION
-    : Number [ \t]* TIME_UNIT
-    ;
+BYTE_SIZE : NumberPattern BYTE_UNIT 'B'? ;
+TIME_DURATION : NumberPattern TIME_UNIT ;
 
 // Fragments and Lexer rules for ByteSize and TimeDuration
 fragment DIGIT : [0-9] ;

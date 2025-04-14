@@ -338,9 +338,27 @@ public final class RecipeVisitor extends DirectivesBaseVisitor<RecipeSymbol.Buil
     } else if (ctx.Bool() != null) {
       builder.addToken(new Bool(Boolean.valueOf(ctx.Bool().getText())));
     } else if (ctx.BYTE_SIZE() != null) {
-      builder.addToken(new ByteSize(ctx.BYTE_SIZE().getText()));
+      try {
+        builder.addToken(new ByteSize(ctx.BYTE_SIZE().getText()));
+      } catch (IllegalArgumentException e) {
+        throw new DirectiveParseException(
+          String.format("Error parsing byte size '%s' at line %d, column %d: %s",
+                        ctx.BYTE_SIZE().getText(),
+                        ctx.getStart().getLine(),
+                        ctx.getStart().getCharPositionInLine(),
+                        e.getMessage()), e);
+      }
     } else if (ctx.TIME_DURATION() != null) {
-      builder.addToken(new TimeDuration(ctx.TIME_DURATION().getText()));
+      try {
+        builder.addToken(new TimeDuration(ctx.TIME_DURATION().getText()));
+      } catch (IllegalArgumentException e) {
+        throw new DirectiveParseException(
+          String.format("Error parsing time duration '%s' at line %d, column %d: %s",
+                        ctx.TIME_DURATION().getText(),
+                        ctx.getStart().getLine(),
+                        ctx.getStart().getCharPositionInLine(),
+                        e.getMessage()), e);
+      }
     }
     return builder;
   }

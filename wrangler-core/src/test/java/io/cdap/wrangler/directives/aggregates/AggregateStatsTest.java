@@ -78,26 +78,35 @@ public class AggregateStatsTest {
 
     @Test
     public void testBasicAggregation() throws Exception {
-        String[] recipe = new String[]{
-                "aggregate-stats :size :time total_mb total_sec"
+        String[] recipe = new String[] {
+            "aggregate-stats :data_size :response_time total_size_bytes total_time_sec"
         };
 
         List<Row> rows = Arrays.asList(
-                new Row("size", "10KB").add("time", "500ms"),
-                new Row("size", "2MB").add("time", "1s"),
-                new Row("size", "1024B").add("time", "2500ms")
+            new Row("id", 1).add("data_size", "10KB").add("response_time", "150ms"),
+            new Row("id", 2).add("data_size", "2.5MB").add("response_time", "1.2s"),
+            new Row("id", 3).add("data_size", "512KB").add("response_time", "50ms"),
+            new Row("id", 4).add("data_size", "1GB").add("response_time", "0.1s")
         );
 
-        double expectedMb = (10.0 * 1024 + 2.0 * 1024 * 1024 + 1024) / MB_DIVISOR;
-        double expectedSec = (500.0 * 1e6 + 1.0 * 1e9 + 2500.0 * 1e6) / NANO_TO_SEC_DIVISOR;
+        long expectedTotalBytes = (10L * 1024L) +
+                                 (long)(2.5 * 1024.0 * 1024.0) +
+                                 (512L * 1024L) +
+                                 (1L * 1024L * 1024L * 1024L);
 
-        List<Row> results = TestingRig.execute(recipe, rows);
+        long expectedTotalNanos = (150L * 1_000_000L) +
+                                  (long)(1.2 * 1_000_000_000L) +
+                                  (50L * 1_000_000L) +
+                                  (long)(0.1 * 1_000_000_000L);
+        double expectedTotalSeconds = (double) expectedTotalNanos / 1_000_000_000.0;
 
-        Assert.assertEquals("Should return a single aggregated row", 1, results.size());
-        Row resultRow = results.get(0);
+        rows = TestingRig.execute(recipe, rows);
 
-        Assert.assertEquals(expectedMb, (Double) resultRow.getValue("total_mb"), DELTA);
-        Assert.assertEquals(expectedSec, (Double) resultRow.getValue("total_sec"), DELTA);
+        Assert.assertEquals(1, rows.size());
+
+        Row resultRow = rows.get(0);
+        Assert.assertEquals((double)expectedTotalBytes, (Double) resultRow.getValue("total_size_bytes"), 0.001);
+        Assert.assertEquals(expectedTotalSeconds, (Double) resultRow.getValue("total_time_sec"), 0.001);
     }
 
     @Test
@@ -167,4 +176,44 @@ public class AggregateStatsTest {
         Assert.assertEquals(expectedMb, (Double) resultRow.getValue("total_mb"), DELTA);
         Assert.assertEquals(expectedSec, (Double) resultRow.getValue("total_sec"), DELTA);
     }
+
+    @Test
+    public void testAggregationWithNullsAndInvalidTypes() throws Exception {
+       String[] recipe = new String[] {
+            "aggregate-stats :data_size :response_time total_size_bytes total_time_sec"
+        };
+
+        List<Row> rows = Arrays.asList(
+            new Row("id", 1).add("data_size", "10KB").add("response_time", "150ms"),
+            new Row("id", 2).add("data_size", null).add("response_time", "1.2s"),
+            new Row("id", 3).add("data_size", "512KB").add("response_time", null),
+            new Row("id", 4).add("data_size", "1GB").add("response_time", "0.1s"),
+            new Row("id", 5).add("data_size", "Not A Size").add("response_time", "50ms"),
+            new Row("id", 6).add("data_size", "10KB").add("response_time", 12345L)
+        );
+
+        try {
+            TestingRig.execute(recipe, rows);
+            Assert.fail("Execution should have failed due to invalid type in input columns.");
+        } catch (Exception e) {
+            Assert.assertTrue("Error message should indicate unexpected type",
+                              e.getMessage().contains("contained unexpected type") ||
+                              (e.getCause() != null && e.getCause().getMessage().contains("contained unexpected type")));
+        }
+    }
+
+    @Test
+    public void testEmptyInput() throws Exception {
+        String[] recipe = new String[] {
+            "aggregate-stats :data_size :response_time total_size_bytes total_time_sec"
+        };
+        List<Row> rows = Arrays.asList();
+
+        rows = TestingRig.execute(recipe, rows);
+
+        Assert.assertEquals(0, rows.size());
+    }
+
+    // TODO: Add tests for optional arguments (output units, average calculation) once implemented.
+
 } 

@@ -16,119 +16,84 @@
 
 package io.cdap.wrangler.api.parser;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import io.cdap.wrangler.api.annotations.Public;
-
-import java.io.Serializable;
-import java.util.Objects;
+import io.cdap.wrangler.api.annotations.PublicEvolving;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.TimeUnit;
+import java.util.Objects;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonPrimitive;
 
 /**
- * Represents a time duration token parsed from a directive argument (e.g., "100ms", "2.5s", "5m").
- * Provides the duration in nanoseconds.
+ * Represents a token containing a time duration value (e.g., 150ms, 2.5s, 1h).
  */
-@Public
-public class TimeDuration implements Token, Serializable {
-    private static final long serialVersionUID = -1234567890123456789L; // Example serialVersionUID
+@PublicEvolving
+public class TimeDuration implements Token {
+    private final long nanos;
+    private final String originalValue;
+    private final String unit;
+    private final TokenType tokenType = TokenType.TIME_DURATION; // Store type
 
-    // Pattern to capture number and unit: (number) (unit) - allows optional space
-    private static final Pattern DURATION_PATTERN = Pattern.compile(
-            "^(-?[0-9]+(?:\\.[0-9]+)?)\\s*([a-zA-Z]+)$", Pattern.CASE_INSENSITIVE);
+    // Regex to capture value and unit (ms, s, m, h, d)
+    private static final Pattern TIME_PATTERN = Pattern.compile("([+-]?\\d*\\.?\\d+)((?:m|M)(?:s|S)?|(?:s|S)|(?:h|H)|(?:d|D))", Pattern.CASE_INSENSITIVE);
 
-    // Nanoseconds multipliers
-    private static final long NANO_PER_MILLI = 1_000_000L;
-    private static final long NANO_PER_SECOND = 1_000_000_000L;
-    private static final long NANO_PER_MINUTE = NANO_PER_SECOND * 60L;
-    private static final long NANO_PER_HOUR = NANO_PER_MINUTE * 60L;
-    private static final long NANO_PER_DAY = NANO_PER_HOUR * 24L;
-
-    private final long nanoseconds;
-    private final double originalValue;
-    private final String originalUnit;
-    private final String tokenString;
-    private final TokenType tokenType = TokenType.TIME_DURATION;
-
-    public TimeDuration(String token) {
-        this.tokenString = token;
-        Matcher matcher = DURATION_PATTERN.matcher(token.trim());
+    public TimeDuration(String token) throws IllegalArgumentException {
+        this.originalValue = token;
+        Matcher matcher = TIME_PATTERN.matcher(token);
         if (!matcher.matches()) {
-            throw new IllegalArgumentException(String.format(
-                    "Invalid time duration format: '%s'. Expected format like '100ms', '2.5s', '5m', '1h', '0.5d'.", token));
+            throw new IllegalArgumentException(String.format("Invalid time duration format: '%s'. Expected format like '150ms', '2.5s', '10m', '1h', '2d'.", token));
         }
 
-        String valueStr = matcher.group(1);
-        String unitStr = matcher.group(2).toLowerCase(); // Normalize unit to lower case
+        double value = Double.parseDouble(matcher.group(1));
+        String parsedUnit = matcher.group(2).toLowerCase(); // Normalize unit to lowercase
+        this.unit = matcher.group(2); // Preserve original case for unit field
 
-        try {
-            this.originalValue = Double.parseDouble(valueStr);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    String.format("Invalid numeric value in time duration: '%s' from token '%s'.", valueStr, token), e);
-        }
-
-        long multiplier = 0L;
-        this.originalUnit = unitStr; // Store the original unit string
-
-        switch (unitStr) {
+        switch (parsedUnit) {
             case "ms":
-                multiplier = NANO_PER_MILLI;
+                this.nanos = (long) (value * TimeUnit.MILLISECONDS.toNanos(1));
                 break;
             case "s":
-                multiplier = NANO_PER_SECOND;
+                this.nanos = (long) (value * TimeUnit.SECONDS.toNanos(1));
                 break;
-            case "m": // minute
-                multiplier = NANO_PER_MINUTE;
+            case "m": // minutes
+                this.nanos = (long) (value * TimeUnit.MINUTES.toNanos(1));
                 break;
-            case "h": // hour
-                multiplier = NANO_PER_HOUR;
+            case "h": // hours
+                this.nanos = (long) (value * TimeUnit.HOURS.toNanos(1));
                 break;
-            case "d": // day
-                multiplier = NANO_PER_DAY;
+            case "d": // days
+                this.nanos = (long) (value * TimeUnit.DAYS.toNanos(1));
                 break;
             default:
-                throw new IllegalArgumentException(String.format("Unknown time unit '%s' in token '%s'. Supported units: ms, s, m, h, d.", unitStr, token));
+                 throw new IllegalArgumentException("Invalid time duration unit: " + parsedUnit);
         }
-
-        // Use double for intermediate calculation to handle fractions of units before converting to long nanoseconds
-        this.nanoseconds = (long) (this.originalValue * multiplier);
     }
 
     /**
-     * @return The duration represented by this token in nanoseconds.
+     * @return The duration in nanoseconds.
      */
-    public long getNanoseconds() {
-        return nanoseconds;
+    public long getNanos() {
+        return nanos;
     }
 
-     /**
-     * @return The original numeric value parsed from the token string.
+    /**
+     * @return The original string representation of the time duration (e.g., "150ms").
      */
-    public double getOriginalValue() {
+    public String getOriginalValue() {
         return originalValue;
     }
 
     /**
-     * @return The original unit string (e.g., "ms", "s") parsed from the token string (normalized to lowercase).
+     * @return The unit part of the original string (e.g., "ms", "s", "h").
      */
-    public String getOriginalUnit() {
-        return originalUnit;
+    public String getUnit() {
+        return unit;
     }
-
-    /**
-     * @return The original, unmodified token string.
-     */
-    public String getTokenString() {
-        return tokenString;
-    }
-
-    // --- Implementation of Token interface methods ---
 
     @Override
     public Object value() {
-        // Return the canonical value (nanoseconds)
-        return this.nanoseconds;
+        // Return the canonical value (nanos) as the primary value
+        return nanos;
     }
 
     @Override
@@ -138,42 +103,32 @@ public class TimeDuration implements Token, Serializable {
 
     @Override
     public JsonElement toJson() {
-        JsonObject jo = new JsonObject();
-        jo.addProperty("type", type().name());
-        jo.addProperty("value_nanoseconds", nanoseconds);
-        jo.addProperty("original_value", originalValue);
-        jo.addProperty("original_unit", originalUnit);
-        jo.addProperty("original_string", tokenString);
-        return jo;
-    }
-
-    // --- Overridden Object methods ---
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        TimeDuration that = (TimeDuration) o;
-        return nanoseconds == that.nanoseconds &&
-               Double.compare(that.originalValue, originalValue) == 0 &&
-               Objects.equals(originalUnit, that.originalUnit) &&
-               Objects.equals(tokenString, that.tokenString) &&
-               tokenType == that.tokenType;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(nanoseconds, originalValue, originalUnit, tokenString, tokenType);
+        // Represent as the original string for JSON serialization
+        return new JsonPrimitive(originalValue);
     }
 
     @Override
     public String toString() {
-        return "TimeDuration{" +
-               "nanoseconds=" + nanoseconds +
-               ", originalValue=" + originalValue +
-               ", originalUnit='" + originalUnit + '\'' +
-               ", tokenString='" + tokenString + '\'' +
-               ", tokenType=" + tokenType +
-               '}';
+      return "TimeDuration{" +
+        "nanos=" + nanos +
+        ", originalValue='" + originalValue + '\'' +
+        ", unit='" + unit + '\'' +
+        '}';
+    }
+
+     @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        TimeDuration that = (TimeDuration) o;
+        // Compare based on essential fields: canonical nanos value and original string
+        return nanos == that.nanos &&
+               Objects.equals(originalValue, that.originalValue);
+    }
+
+    @Override
+    public int hashCode() {
+        // Hash based on essential fields
+        return Objects.hash(nanos, originalValue);
     }
 } 

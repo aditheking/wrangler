@@ -17,97 +17,87 @@
 package io.cdap.wrangler.api.parser;
 
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import io.cdap.wrangler.api.annotations.Public;
+import com.google.gson.JsonPrimitive;
+import io.cdap.wrangler.api.annotations.PublicEvolving;
 
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Represents a byte size value specified as a token, e.g., "10KB", "1.5MB".
+ * Represents a token containing a byte size value (e.g., 10KB, 1.5MB).
  */
-@Public
+@PublicEvolving
 public class ByteSize implements Token {
-    private static final long serialVersionUID = -865938567919409583L;
-    private static final Pattern BYTE_PATTERN = Pattern.compile(
-            "^(-?[0-9]+(?:\\.[0-9]+)?)\\s*([kKmMgGtTpP]?)B?$", Pattern.CASE_INSENSITIVE);
-    private static final long KB_MULTIPLIER = 1024L;
-    private static final long MB_MULTIPLIER = KB_MULTIPLIER * 1024L;
-    private static final long GB_MULTIPLIER = MB_MULTIPLIER * 1024L;
-    private static final long TB_MULTIPLIER = GB_MULTIPLIER * 1024L;
-    private static final long PB_MULTIPLIER = TB_MULTIPLIER * 1024L;
-
     private final long bytes;
-    private final double originalValue;
+    private final String originalValue;
     private final String unit;
-    private final String tokenString; // Store original token string
     private final TokenType tokenType = TokenType.BYTE_SIZE; // Store type
 
-    public ByteSize(String token) {
-        this.tokenString = token;
-        Matcher matcher = BYTE_PATTERN.matcher(token.trim());
+    private static final Pattern BYTE_PATTERN = Pattern.compile("([+-]?\\d*\\.?\\d+)([kKmMgGtTpP])B?", Pattern.CASE_INSENSITIVE);
+    private static final long KB = 1024L;
+    private static final long MB = 1024L * KB;
+    private static final long GB = 1024L * MB;
+    private static final long TB = 1024L * GB;
+    private static final long PB = 1024L * TB;
+
+    public ByteSize(String token) throws IllegalArgumentException {
+        this.originalValue = token;
+        Matcher matcher = BYTE_PATTERN.matcher(token);
         if (!matcher.matches()) {
-            throw new IllegalArgumentException(String.format(
-                    "Invalid byte size format: '%s'. Expected format like '10KB', '1.5MB', '1024'.", token));
+            throw new IllegalArgumentException(String.format("Invalid byte size format: '%s'. Expected format like '10KB', '1.5MB'.", token));
         }
 
-        String valueStr = matcher.group(1);
-        String unitChar = matcher.group(2);
+        double value = Double.parseDouble(matcher.group(1));
+        String parsedUnit = matcher.group(2).toUpperCase();
+        this.unit = parsedUnit + (token.toUpperCase().endsWith("B") ? "B" : "");
 
-        try {
-            this.originalValue = Double.parseDouble(valueStr);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    String.format("Invalid numeric value in byte size: '%s' from token '%s'.", valueStr, token), e);
+        switch (parsedUnit) {
+            case "K":
+                this.bytes = (long) (value * KB);
+                break;
+            case "M":
+                this.bytes = (long) (value * MB);
+                break;
+            case "G":
+                this.bytes = (long) (value * GB);
+                break;
+            case "T":
+                this.bytes = (long) (value * TB);
+                break;
+            case "P":
+                this.bytes = (long) (value * PB);
+                break;
+            default:
+                 throw new IllegalArgumentException("Invalid byte size unit: " + parsedUnit);
         }
-
-        long multiplier = 1L;
-        this.unit = (unitChar == null || unitChar.isEmpty()) ? "B" : unitChar.toUpperCase() + "B";
-
-        if (unitChar != null && !unitChar.isEmpty()) {
-            switch (Character.toUpperCase(unitChar.charAt(0))) {
-                case 'K':
-                    multiplier = KB_MULTIPLIER;
-                    break;
-                case 'M':
-                    multiplier = MB_MULTIPLIER;
-                    break;
-                case 'G':
-                    multiplier = GB_MULTIPLIER;
-                    break;
-                case 'T':
-                    multiplier = TB_MULTIPLIER;
-                    break;
-                case 'P':
-                    multiplier = PB_MULTIPLIER;
-                    break;
-            }
-        }
-        this.bytes = (long) (this.originalValue * multiplier);
     }
 
+    /**
+     * @return The size in bytes.
+     */
     public long getBytes() {
         return bytes;
     }
 
-    public double getOriginalValue() {
+    /**
+     * @return The original string representation of the byte size (e.g., "10KB").
+     */
+    public String getOriginalValue() {
         return originalValue;
     }
 
+    /**
+     * @return The unit part of the original string (e.g., "KB", "MB").
+     */
     public String getUnit() {
         return unit;
     }
 
-    public String getTokenString() {
-        return tokenString;
-    }
-
-    // --- Implementation of Token interface methods ---
-
     @Override
     public Object value() {
-        return this.bytes;
+      // Return the canonical value (bytes) as the primary value
+      return bytes;
     }
 
     @Override
@@ -117,46 +107,32 @@ public class ByteSize implements Token {
 
     @Override
     public JsonElement toJson() {
-        JsonObject jo = new JsonObject();
-        jo.addProperty("type", type().name());
-        jo.addProperty("value_bytes", bytes);
-        jo.addProperty("original_value", originalValue);
-        jo.addProperty("original_unit", unit);
-        jo.addProperty("original_string", tokenString);
-        return jo;
-    }
-
-    // --- Overridden Object methods ---
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        ByteSize byteSize = (ByteSize) o;
-        return bytes == byteSize.bytes &&
-               Double.compare(byteSize.originalValue, originalValue) == 0 &&
-               Objects.equals(unit, byteSize.unit) &&
-               Objects.equals(tokenString, byteSize.tokenString) &&
-               tokenType == byteSize.tokenType;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(bytes, originalValue, unit, tokenString, tokenType);
+        // Represent as the original string for JSON serialization, consistent with other tokens
+        return new JsonPrimitive(originalValue);
     }
 
     @Override
     public String toString() {
-        return "ByteSize{" +
-               "bytes=" + bytes +
-               ", originalValue=" + originalValue +
-               ", unit='" + unit + '\'' +
-               ", tokenString='" + tokenString + '\'' +
-               ", tokenType=" + tokenType +
-               '}';
+      return "ByteSize{" +
+        "bytes=" + bytes +
+        ", originalValue='" + originalValue + '\'' +
+        ", unit='" + unit + '\'' +
+        '}';
+    }
+
+     @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ByteSize byteSize = (ByteSize) o;
+        // Compare based on essential fields: canonical bytes value and original string
+        return bytes == byteSize.bytes &&
+               Objects.equals(originalValue, byteSize.originalValue);
+    }
+
+    @Override
+    public int hashCode() {
+        // Hash based on essential fields
+        return Objects.hash(bytes, originalValue);
     }
 } 

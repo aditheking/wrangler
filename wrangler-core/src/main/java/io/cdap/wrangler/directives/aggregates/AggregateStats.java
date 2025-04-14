@@ -15,16 +15,13 @@
  */
 package io.cdap.wrangler.directives.aggregates;
 
-import io.cdap.wrangler.api.Arguments;
 import io.cdap.wrangler.api.Directive;
-import io.cdap.wrangler.api.FinalisingDirective;
-import io.cdap.wrangler.api.DirectiveExecutionException;
+import io.cdap.cdap.api.annotation.Description;
+import io.cdap.cdap.api.annotation.Name;
+import io.cdap.wrangler.api.Arguments;
 import io.cdap.wrangler.api.DirectiveParseException;
 import io.cdap.wrangler.api.ExecutorContext;
 import io.cdap.wrangler.api.Row;
-import io.cdap.wrangler.api.annotations.Categories;
-import io.cdap.wrangler.api.annotations.Description;
-import io.cdap.wrangler.api.annotations.Name;
 import io.cdap.wrangler.api.annotations.Usage;
 import io.cdap.wrangler.api.parser.ColumnName;
 import io.cdap.wrangler.api.parser.TokenType;
@@ -32,123 +29,128 @@ import io.cdap.wrangler.api.parser.UsageDefinition;
 import io.cdap.wrangler.api.parser.ByteSize;
 import io.cdap.wrangler.api.parser.TimeDuration;
 import io.cdap.wrangler.api.TransientStore;
+import io.cdap.wrangler.api.DirectiveExecutionException;
 import io.cdap.wrangler.api.TransientVariableScope;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.ArrayList;
 
 /**
- * A directive that aggregates byte sizes and time durations from specified columns.
+ * A directive that aggregates byte size and time duration columns.
  */
-@Name("aggregate-stats")
-@Categories(categories = {"aggregate"})
-@Description("Aggregates total byte size and total time duration from specified columns.")
-@Usage("aggregate-stats :size_column :time_column :target_size_total :target_time_total")
-public class AggregateStats implements FinalisingDirective {
+@Name(AggregateStats.NAME)
+@Description("Aggregates byte size and time duration columns, calculating total size and total time.")
+@Usage(AggregateStats.USAGE)
+public class AggregateStats implements Directive {
 
-    public static final String AGG_TOTAL_BYTES = "aggregate-stats.totalBytes";
-    public static final String AGG_TOTAL_NANOS = "aggregate-stats.totalNanos";
-    public static final String AGG_COUNT = "aggregate-stats.count";
-    public static final String FINAL_RESULT_KEY = "_directive.result";
+    public static final String NAME = "aggregate-stats";
+    private static final String ARG_SIZE_COL = "size_col";
+    private static final String ARG_TIME_COL = "time_col";
+    private static final String ARG_TARGET_SIZE_COL = "target_size_col";
+    private static final String ARG_TARGET_TIME_COL = "target_time_col";
+    public static final String USAGE = NAME + " :" + ARG_SIZE_COL + " :" + ARG_TIME_COL + " :" + ARG_TARGET_SIZE_COL + " :" + ARG_TARGET_TIME_COL;
 
     private String sizeCol;
     private String timeCol;
     private String targetSizeCol;
     private String targetTimeCol;
 
+    // Keys for TransientStore
+    private static final String TOTAL_BYTES_KEY = NAME + ".total.bytes";
+    private static final String TOTAL_NANOS_KEY = NAME + ".total.nanos";
+    private static final String ROW_COUNT_KEY = NAME + ".row.count";
+    // Key to store final result list in TransientStore (Framework might look for this)
+    private static final String FINAL_RESULT_KEY = NAME + ".final.result";
+
+    // Need context in destroy to access store
+    private transient ExecutorContext context = null;
+
     @Override
     public UsageDefinition define() {
-        UsageDefinition.Builder builder = UsageDefinition.builder("aggregate-stats");
-        builder.define("size_column", TokenType.COLUMN_NAME);
-        builder.define("time_column", TokenType.COLUMN_NAME);
-        builder.define("target_size_total", TokenType.COLUMN_NAME);
-        builder.define("target_time_total", TokenType.COLUMN_NAME);
-        // TODO: Add optional arguments for output units (e.g., MB, s) and aggregation type (total/average)
+        UsageDefinition.Builder builder = UsageDefinition.builder(NAME);
+        builder.define(ARG_SIZE_COL, TokenType.COLUMN_NAME);
+        builder.define(ARG_TIME_COL, TokenType.COLUMN_NAME);
+        builder.define(ARG_TARGET_SIZE_COL, TokenType.COLUMN_NAME);
+        builder.define(ARG_TARGET_TIME_COL, TokenType.COLUMN_NAME);
         return builder.build();
     }
 
     @Override
     public void initialize(Arguments args) throws DirectiveParseException {
-        this.sizeCol = ((ColumnName) args.value("size_column")).value();
-        this.timeCol = ((ColumnName) args.value("time_column")).value();
-        this.targetSizeCol = ((ColumnName) args.value("target_size_total")).value();
-        this.targetTimeCol = ((ColumnName) args.value("target_time_total")).value();
+        this.sizeCol = ((ColumnName) args.value(ARG_SIZE_COL)).value();
+        this.timeCol = ((ColumnName) args.value(ARG_TIME_COL)).value();
+        this.targetSizeCol = ((ColumnName) args.value(ARG_TARGET_SIZE_COL)).value();
+        this.targetTimeCol = ((ColumnName) args.value(ARG_TARGET_TIME_COL)).value();
+        // Reset state in case of reuse
+        this.context = null;
     }
 
     @Override
     public List<Row> execute(List<Row> rows, ExecutorContext context) throws DirectiveExecutionException {
+        // Store context for use in destroy()
+        if (this.context == null) {
+            this.context = context;
+        }
         TransientStore store = context.getTransientStore();
-
-        // Get current aggregates or initialize if null
-        long currentBytes = store.<Long>get(AGG_TOTAL_BYTES) == null ? 0L : store.<Long>get(AGG_TOTAL_BYTES);
-        long currentNanos = store.<Long>get(AGG_TOTAL_NANOS) == null ? 0L : store.<Long>get(AGG_TOTAL_NANOS);
-        long currentCount = store.<Long>get(AGG_COUNT) == null ? 0L : store.<Long>get(AGG_COUNT);
 
         for (Row row : rows) {
-            Object sizeVal = row.getValue(sizeCol);
-            Object timeVal = row.getValue(timeCol);
+            Object sizeValue = row.getValue(sizeCol);
+            Object timeValue = row.getValue(timeCol);
+            boolean rowProcessed = false;
 
-            // Process only if both values are non-null Strings
-            if (sizeVal instanceof String && timeVal instanceof String) {
-                try {
-                    ByteSize size = new ByteSize((String) sizeVal);
-                    TimeDuration duration = new TimeDuration((String) timeVal);
+            if (sizeValue instanceof ByteSize) {
+                Long currentBytes = store.<Long>get(TOTAL_BYTES_KEY);
+                currentBytes = (currentBytes == null) ? 0L : currentBytes;
+                store.set(TransientVariableScope.GLOBAL, TOTAL_BYTES_KEY, currentBytes + ((ByteSize) sizeValue).getBytes());
+                rowProcessed = true;
+            } else if (sizeValue != null) {
+                 throw new DirectiveExecutionException(NAME, String.format("Column '%s' contained unexpected type '%s'. Expected ByteSize.",
+                                                        sizeCol, sizeValue.getClass().getName()), new IllegalArgumentException());
+            }
 
-                    currentBytes += size.getBytes();
-                    currentNanos += duration.getNanoseconds();
-                    currentCount++;
-
-                } catch (IllegalArgumentException e) {
-                    // Skip row if parsing fails (e.g., invalid format)
-                    // Optional: Add logging using context.getTracer() or context.getMetrics()
-                    // context.getMetrics().count("aggregate-stats.parse.errors", 1);
-                } catch (Exception e) {
-                   // Catch unexpected errors during processing of a row
-                   throw new DirectiveExecutionException("aggregate-stats",
-                                                     String.format("Unexpected error processing row: %s", e.getMessage()), e);
+            if (timeValue instanceof TimeDuration) {
+                Long currentNanos = store.<Long>get(TOTAL_NANOS_KEY);
+                currentNanos = (currentNanos == null) ? 0L : currentNanos;
+                store.set(TransientVariableScope.GLOBAL, TOTAL_NANOS_KEY, currentNanos + ((TimeDuration) timeValue).getNanos());
+                if (rowProcessed) {
+                     Long count = store.<Long>get(ROW_COUNT_KEY);
+                     count = (count == null) ? 0L : count;
+                     store.set(TransientVariableScope.GLOBAL, ROW_COUNT_KEY, count + 1);
                 }
-            } // Optional: else if (sizeVal != null || timeVal != null) { log warning about non-string type? }
+            } else if (timeValue != null) {
+                 throw new DirectiveExecutionException(NAME, String.format("Column '%s' contained unexpected type '%s'. Expected TimeDuration.",
+                                                        timeCol, timeValue.getClass().getName()), new IllegalArgumentException());
+            }
         }
-
-        // Update store with new totals
-        store.set(TransientVariableScope.GLOBAL, AGG_TOTAL_BYTES, currentBytes);
-        store.set(TransientVariableScope.GLOBAL, AGG_TOTAL_NANOS, currentNanos);
-        store.set(TransientVariableScope.GLOBAL, AGG_COUNT, currentCount);
-
-        // Aggregation directives return empty list during execute phase
-        return new ArrayList<>();
-    }
-
-    @Override
-    public List<Row> finish(ExecutorContext context) {
-        TransientStore store = context.getTransientStore();
-
-        // Retrieve final values from the store, defaulting to 0 if null
-        long totalBytes = store.<Long>get(AGG_TOTAL_BYTES) == null ? 0L : store.<Long>get(AGG_TOTAL_BYTES);
-        long totalNanos = store.<Long>get(AGG_TOTAL_NANOS) == null ? 0L : store.<Long>get(AGG_TOTAL_NANOS);
-        long count = store.<Long>get(AGG_COUNT) == null ? 0L : store.<Long>get(AGG_COUNT);
-
-        List<Row> finalResult = new ArrayList<>();
-        if (count > 0) {
-            // --- Unit Conversions (Example: Bytes to MB, Nanos to Seconds) ---
-            // TODO: Make units configurable via directive arguments
-            double totalMB = (double) totalBytes / (1024.0 * 1024.0); // Using 1024^2 for MB
-            double totalSeconds = (double) totalNanos / 1_000_000_000.0;
-
-            // Create the single result row
-            Row resultRow = new Row();
-            resultRow.add(targetSizeCol, totalMB); // Storing as double MB
-            resultRow.add(targetTimeCol, totalSeconds); // Storing as double Seconds
-            finalResult.add(resultRow);
-        }
-        // else: if count is 0, finalResult remains empty, which is correct.
-
-        // FinalisingDirectives return the final result directly
-        return finalResult;
+        return new ArrayList<>(); // Return empty list during execution
     }
 
     @Override
     public void destroy() {
-        // No resources to clean up
+        // Final aggregation happens here
+        if (this.context != null) {
+             TransientStore store = this.context.getTransientStore();
+             Long totalBytes = store.<Long>get(TOTAL_BYTES_KEY);
+             Long totalNanos = store.<Long>get(TOTAL_NANOS_KEY);
+             Long rowCount = store.<Long>get(ROW_COUNT_KEY);
+
+             totalBytes = (totalBytes == null) ? 0L : totalBytes;
+             totalNanos = (totalNanos == null) ? 0L : totalNanos;
+             rowCount = (rowCount == null) ? 0L : rowCount;
+
+             List<Row> result = new ArrayList<>();
+             if (rowCount > 0) {
+                 Row outputRow = new Row();
+                 // TODO: Unit conversion
+                 outputRow.add(targetSizeCol, (double) totalBytes);
+                 outputRow.add(targetTimeCol, (double) totalNanos / 1_000_000_000.0);
+                 result.add(outputRow);
+             }
+             // Store the final result list in the transient store - hoping the framework picks it up
+             store.set(TransientVariableScope.GLOBAL, FINAL_RESULT_KEY, result);
+        } // else: context was null, cannot produce final result (should not happen in normal flow)
+
+        // Clean up context reference
+        this.context = null;
     }
 } 
