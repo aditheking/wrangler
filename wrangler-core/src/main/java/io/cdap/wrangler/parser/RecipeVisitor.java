@@ -34,6 +34,11 @@ import io.cdap.wrangler.api.parser.Ranges;
 import io.cdap.wrangler.api.parser.Text;
 import io.cdap.wrangler.api.parser.TextList;
 import io.cdap.wrangler.api.parser.Token;
+import io.cdap.wrangler.api.parser.ByteSize;
+import io.cdap.wrangler.api.parser.TimeDuration;
+import io.cdap.wrangler.api.TransientStore;
+import io.cdap.wrangler.api.TransientVariableScope;
+import io.cdap.wrangler.api.DirectiveParseException;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.misc.Interval;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -317,6 +322,29 @@ public final class RecipeVisitor extends DirectivesBaseVisitor<RecipeSymbol.Buil
     return builder;
   }
 
+  /**
+   * A Directive can include a value (String | Number | Column | Bool).
+   */
+  @Override
+  public RecipeSymbol.Builder visitValue(DirectivesParser.ValueContext ctx) {
+    if (ctx.String() != null) {
+      String value = ctx.String().getText();
+      builder.addToken(new Text(value.substring(1, value.length() - 1)));
+    } else if (ctx.Number() != null) {
+      LazyNumber number = new LazyNumber(ctx.Number().getText());
+      builder.addToken(new Numeric(number));
+    } else if (ctx.Column() != null) {
+      builder.addToken(new ColumnName(ctx.Column().getText().substring(1)));
+    } else if (ctx.Bool() != null) {
+      builder.addToken(new Bool(Boolean.valueOf(ctx.Bool().getText())));
+    } else if (ctx.BYTE_SIZE() != null) {
+      builder.addToken(new ByteSize(ctx.BYTE_SIZE().getText()));
+    } else if (ctx.TIME_DURATION() != null) {
+      builder.addToken(new TimeDuration(ctx.TIME_DURATION().getText()));
+    }
+    return builder;
+  }
+
   private SourceInfo getOriginalSource(ParserRuleContext ctx) {
     int a = ctx.getStart().getStartIndex();
     int b = ctx.getStop().getStopIndex();
@@ -324,6 +352,7 @@ public final class RecipeVisitor extends DirectivesBaseVisitor<RecipeSymbol.Buil
     String text = ctx.start.getInputStream().getText(interval);
     int lineno = ctx.getStart().getLine();
     int column = ctx.getStart().getCharPositionInLine();
+    // Use the simpler constructor matching other parts of the code
     return new SourceInfo(lineno, column, text);
   }
 }

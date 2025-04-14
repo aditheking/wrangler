@@ -75,4 +75,20 @@ public class GrammarBasedParserTest {
     Assert.assertEquals(0, directives.size());
   }
 
+  @Test
+  public void testNewUnitTypesParsing() throws Exception {
+    // This test checks if the parser correctly recognizes the new token types.
+    // It doesn't require the 'test-directive' to actually exist or be executable.
+    String[] recipe = new String[] {
+      "test-directive :col1 10MB 500ms 'some text' 123 true;"
+    };
+
+    try {
+      RecipeParser parser = TestingRig.parse(recipe);
+      Assert.assertNotNull(parser); // Basic check that parsing didn't throw exception
+    } catch (Exception e) {
+      Assert.fail("Parser failed to recognize recipe with new unit types (BYTE_SIZE, TIME_DURATION): " + e.getMessage());
+    }
+  }
+
 }

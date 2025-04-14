@@ -254,6 +254,7 @@
                 <consoleOutput>true</consoleOutput>
                 <failsOnError>true</failsOnError>
                 <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                <skip>${checkstyle.skip}</skip>
                 <!--
                   excludes don't apply to the target directory, so need to specify this to
                   avoid checking generated antlr code

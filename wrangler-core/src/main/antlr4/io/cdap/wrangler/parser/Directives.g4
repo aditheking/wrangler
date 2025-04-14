@@ -140,7 +140,7 @@ numberRange
  ;
 
 value
- : String | Number | Column | Bool
+ : String | Number | Column | Bool | BYTE_SIZE | TIME_DURATION
  ;
 
 ecommand
@@ -195,6 +195,14 @@ identifierList
  : Identifier (',' Identifier)*
  ;
 
+// Fragments needed for the above rules
+fragment BYTE_UNIT : [kKmMgGtTpP] ;
+fragment TIME_UNIT
+    : ('m'|'M') ('s'|'S')? // ms or m
+    | ('s'|'S')          // s
+    | ('h'|'H')          // h
+    | ('d'|'D')          // d
+    ;
 
 /*
  * Following are the Lexer Rules used for tokenizing the recipe.
@@ -253,12 +261,28 @@ Bool
  | 'false'
  ;
 
+// Define Number rule first to avoid ambiguity with optional units in BYTE_SIZE
 Number
- : Int ('.' Digit*)?
+ : '-'? ( NZDIGIT ( DIGIT )* | '0' ) ( '.' ( DIGIT )+ )? (EXPONENT)?
  ;
 
+// Re-add BYTE_SIZE and TIME_DURATION lexer rules AFTER Number
+BYTE_SIZE
+    : Number [ \t]* ( BYTE_UNIT ('B'|'b')? | ('B'|'b') )
+    ;
+
+TIME_DURATION
+    : Number [ \t]* TIME_UNIT
+    ;
+
+// Fragments and Lexer rules for ByteSize and TimeDuration
+fragment DIGIT : [0-9] ;
+fragment NZDIGIT : [1-9] ;
+fragment LETTER : [a-zA-Z] ;
+fragment EXPONENT : [eE] [+\\-]? DIGIT+ ;
+
 Identifier
- : [a-zA-Z_\-] [a-zA-Z_0-9\-]*
+ : (LETTER | '_') (LETTER | DIGIT | '_' | '-')*
  ;
 
 Macro
@@ -301,13 +325,4 @@ Comment
 
 Space
  : [ \t\r\n\u000C]+ -> skip
- ;
-
-fragment Int
- : '-'? [1-9] Digit* [L]*
- | '0'
- ;
-
-fragment Digit
- : [0-9]
  ;

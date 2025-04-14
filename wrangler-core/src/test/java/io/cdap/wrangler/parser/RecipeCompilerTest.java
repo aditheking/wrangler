@@ -215,4 +215,12 @@ public class RecipeCompilerTest {
     Set<String> loadableDirectives = compile.getSymbols().getLoadableDirectives();
     Assert.assertEquals(4, loadableDirectives.size());
   }
+
+  @Test
+  public void testAggregateStatsDirectiveParsing() throws Exception {
+    String[] recipe = new String[]{
+      "aggregate-stats :data_size :response_time :total_size :total_time;"
+    };
+    TestingRig.compileSuccess(recipe); // Asserts that compilation doesn't throw an exception
+  }
 }
