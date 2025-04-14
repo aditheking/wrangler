@@ -323,10 +323,10 @@ public final class RecipeVisitor extends DirectivesBaseVisitor<RecipeSymbol.Buil
   }
 
   /**
-   * A Directive can include a value (String | Number | Column | Bool).
+   * A Directive can include a value (String | Number | Column | Bool | BYTE_SIZE | TIME_DURATION).
    */
   @Override
-  public RecipeSymbol.Builder visitValue(DirectivesParser.ValueContext ctx) {
+  public RecipeSymbol.Builder visitValue(DirectivesParser.ValueContext ctx) throws DirectiveParseException {
     if (ctx.String() != null) {
       String value = ctx.String().getText();
       builder.addToken(new Text(value.substring(1, value.length() - 1)));

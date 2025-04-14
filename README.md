@@ -61,6 +61,15 @@ Videos and Screencasts are best way to learn, so we have compiled simple, short 
   * [Parsing CSV Files and Extracting Column Values](wrangler-demos/parsing-csv-extracting-column-values.md)
   * [Parsing HL7 CCDA XML Files](wrangler-demos/parsing-hl7-ccda-xml-files.md)
 
+## New Argument Types (Task 3b)
+
+This library now supports native parsing of byte sizes and time durations as arguments within directives.
+
+*   **Byte Sizes:** Use standard units like KB, MB, GB, TB, PB (case-insensitive, optional 'B' suffix). Examples: `10KB`, `2.5mb`, `1G`.
+*   **Time Durations:** Use standard units like ns, ms, s, m (minutes), h, d (case-insensitive). Examples: `150ms`, `2.5S`, `10m`, `1.5h`.
+
+These can be used in any directive argument specified to accept `TokenType.BYTE_SIZE` or `TokenType.TIME_DURATION` respectively.
+
 ## Available Directives
 
 These directives are currently available:
@@ -157,6 +166,7 @@ These directives are currently available:
 | **Transient Aggregators & Setters**                                    |                                                                  |
 | [Increment Variable](wrangler-docs/directives/increment-variable.md)            | Increments a transient variable with a record of processing.     |
 | [Set Variable](wrangler-docs/directives/set-variable.md)                        | Sets a transient variable with a record of processing.     |
+| [Aggregate Stats](#aggregate-stats-directive)                          | Aggregates byte size and time duration columns (total or average). |
 | **Functions**                                                          |                                                                  |
 | [Data Quality](wrangler-docs/functions/dq-functions.md)                         | Data quality check functions. Checks for date, time, etc.        |
 | [Date Manipulations](wrangler-docs/functions/date-functions.md)                 | Functions that can manipulate date                               |
@@ -216,3 +226,37 @@ Cask is a trademark of Cask Data, Inc. All rights reserved.
 
 Apache, Apache HBase, and HBase are trademarks of The Apache Software Foundation. Used with
 permission. No endorsement by The Apache Software Foundation is implied by the use of these marks.
+
+## Aggregate Stats Directive (Task 3d)
+
+Calculates aggregate statistics (total or average) for columns containing byte sizes and time durations.
+
+**Syntax:**
+
+```
+aggregate-stats :<size-column> :<time-column> :<target-size-column> :<target-time-column> [aggregation_type:<'total'|'average'>] [size_unit:<output-unit>] [time_unit:<output-unit>]
+```
+
+**Arguments:**
+
+*   `:<size-column>`: (ColumnName) The source column containing byte size values (e.g., '10KB', '2.5MB').
+*   `:<time-column>`: (ColumnName) The source column containing time duration values (e.g., '150ms', '1.5s').
+*   `:<target-size-column>`: (ColumnName) The name of the new column to store the resulting aggregate size.
+*   `:<target-time-column>`: (ColumnName) The name of the new column to store the resulting aggregate time.
+*   `aggregation_type:<'total'|'average'>`: (Optional<Text>, Default: 'total') Specifies whether to calculate the 'total' or 'average' of the values.
+*   `size_unit:<output-unit>`: (Optional<Text>, Default: 'B') Specifies the desired output unit for the size aggregation. Supported units: 'B', 'KB', 'MB', 'GB', 'TB', 'PB' (case-insensitive).
+*   `time_unit:<output-unit>`: (Optional<Text>, Default: 's') Specifies the desired output unit for the time aggregation. Supported units: 'ns', 'ms', 's', 'm', 'h', 'd' (case-insensitive).
+
+**Usage Notes:**
+
+*   The directive processes input rows and accumulates values in memory.
+*   It outputs a single row containing the final aggregate values after all input rows have been processed.
+*   Rows containing null values or values of unexpected types (not parsable as ByteSize or TimeDuration) in the specified source columns will be skipped for the respective calculation (size or time). A warning will be logged.
+*   If no valid rows are processed, an empty result is produced.
+
+**Example:**
+
+```
+# Calculate total size in Megabytes (MB) and average response time in seconds (s)
+aggregate-stats :data_transfer_size :response_time total_size_mb avg_response_time_sec aggregation_type:'average' size_unit:'MB' time_unit:'s'
+```

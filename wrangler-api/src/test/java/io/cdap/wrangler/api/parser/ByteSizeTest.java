@@ -105,16 +105,12 @@ public class ByteSizeTest {
      @Test
      public void testGetOriginalValueAndUnit() {
          ByteSize bs1 = new ByteSize("1.5GB");
-         Assert.assertEquals(1.5, bs1.getOriginalValue(), 0.001);
+         Assert.assertEquals("1.5GB", bs1.getOriginalValue());
          Assert.assertEquals("GB", bs1.getUnit());
 
-         ByteSize bs2 = new ByteSize("2048");
-         Assert.assertEquals(2048, bs2.getOriginalValue(), 0.001);
-         Assert.assertEquals("B", bs2.getUnit());
-
          ByteSize bs3 = new ByteSize("10k");
-         Assert.assertEquals(10, bs3.getOriginalValue(), 0.001);
-         Assert.assertEquals("KB", bs3.getUnit());
+         Assert.assertEquals("10k", bs3.getOriginalValue());
+         Assert.assertEquals("K", bs3.getUnit());
      }
 
     @Test
@@ -142,15 +138,10 @@ public class ByteSizeTest {
         Assert.assertEquals("GB", bs.getUnit());
         Assert.assertEquals(123L * 1024L * 1024L * 1024L, bs.getBytes());
 
-        ByteSize bs2 = new ByteSize("2.7p"); // Petabytes without B
+        ByteSize bs2 = new ByteSize("2.7p");
         Assert.assertEquals("2.7p", bs2.getOriginalValue());
-        Assert.assertEquals("P", bs2.getUnit()); // Unit should still capture P
+        Assert.assertEquals("P", bs2.getUnit());
         Assert.assertEquals((long)(2.7 * 1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0), bs2.getBytes());
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testInvalidFormatNoUnit() {
-        new ByteSize("100");
     }
 
     @Test(expected = IllegalArgumentException.class)

@@ -1,0 +1,8 @@
+
+AI assistance was utilized during this assignment primarily for:
+
+*   **Troubleshooting:** Diagnosing build errors and resolving compilation issues.
+*   **Code Understanding:** Searching the codebase to understand existing patterns and API usage (e.g., `TransientStore`, annotations).
+*   **Boilerplate Generation:** Assisting with the creation of new classes (Tokens, Directive, Tests) based on defined requirements.
+*   **Debugging:** Identifying and fixing linter errors and minor bugs during implementation.
+

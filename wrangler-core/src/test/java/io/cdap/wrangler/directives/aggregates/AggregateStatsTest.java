@@ -178,28 +178,48 @@ public class AggregateStatsTest {
     }
 
     @Test
-    public void testAggregationWithNullsAndInvalidTypes() throws Exception {
+    public void testAggregationWithNullsAndInvalidTypesSkipping() throws Exception {
        String[] recipe = new String[] {
             "aggregate-stats :data_size :response_time total_size_bytes total_time_sec"
         };
 
         List<Row> rows = Arrays.asList(
-            new Row("id", 1).add("data_size", "10KB").add("response_time", "150ms"),
-            new Row("id", 2).add("data_size", null).add("response_time", "1.2s"),
-            new Row("id", 3).add("data_size", "512KB").add("response_time", null),
-            new Row("id", 4).add("data_size", "1GB").add("response_time", "0.1s"),
-            new Row("id", 5).add("data_size", "Not A Size").add("response_time", "50ms"),
-            new Row("id", 6).add("data_size", "10KB").add("response_time", 12345L)
+            new Row("id", 1).add("data_size", "10KB").add("response_time", "150ms"),  // Valid (counts for both)
+            new Row("id", 2).add("data_size", null).add("response_time", "1.2s"),      // Null size (counts for time only)
+            new Row("id", 3).add("data_size", "512KB").add("response_time", null),     // Null time (counts for size only)
+            new Row("id", 4).add("data_size", "1GB").add("response_time", "0.1s"),   // Valid (counts for both)
+            new Row("id", 5).add("data_size", "Not A Size").add("response_time", "50ms"), // Invalid size (counts for time only)
+            new Row("id", 6).add("data_size", "10KB").add("response_time", 12345L)  // Invalid time type (counts for size only)
         );
 
-        try {
-            TestingRig.execute(recipe, rows);
-            Assert.fail("Execution should have failed due to invalid type in input columns.");
-        } catch (Exception e) {
-            Assert.assertTrue("Error message should indicate unexpected type",
-                              e.getMessage().contains("contained unexpected type") ||
-                              (e.getCause() != null && e.getCause().getMessage().contains("contained unexpected type")));
-        }
+        // Expected values (based on skipping invalid values)
+        // Rows contributing to size: 1, 3, 4, 6
+        long expectedTotalBytes = (10L * 1024L) +      // Row 1
+                                 (512L * 1024L) +      // Row 3
+                                 (1L * 1024L * 1024L * 1024L) + // Row 4
+                                 (10L * 1024L);         // Row 6
+
+        // Rows contributing to time: 1, 2, 4, 5
+        long expectedTotalNanos = (150L * 1_000_000L) +  // Row 1
+                                  (long)(1.2 * 1_000_000_000L) + // Row 2
+                                  (long)(0.1 * 1_000_000_000L) + // Row 4
+                                  (50L * 1_000_000L);   // Row 5
+        double expectedTotalSeconds = (double) expectedTotalNanos / 1_000_000_000.0;
+
+        // Row count should only include rows where BOTH were valid: Rows 1 and 4
+        // This impacts average calculation if tested later.
+        // long expectedRowCount = 2;
+
+        // Execute the recipe
+        rows = TestingRig.execute(recipe, rows);
+
+        // Should still produce one result row, even with skips
+        Assert.assertEquals(1, rows.size());
+        Row resultRow = rows.get(0);
+
+        // Assert calculated totals based on skipped values
+        Assert.assertEquals((double)expectedTotalBytes, (Double) resultRow.getValue("total_size_bytes"), DELTA);
+        Assert.assertEquals(expectedTotalSeconds, (Double) resultRow.getValue("total_time_sec"), DELTA);
     }
 
     @Test
@@ -214,6 +234,96 @@ public class AggregateStatsTest {
         Assert.assertEquals(0, rows.size());
     }
 
-    // TODO: Add tests for optional arguments (output units, average calculation) once implemented.
+    @Test
+    public void testBasicAggregationTotalBytesSeconds() throws Exception {
+        String[] recipe = new String[] {
+            // Default: total, bytes, seconds
+            "aggregate-stats :data_size :response_time total_size_bytes total_time_sec"
+        };
+        List<Row> rows = createSampleRows();
+        long expectedTotalBytes = calculateExpectedTotalBytes();
+        double expectedTotalSeconds = calculateExpectedTotalSeconds();
+
+        rows = TestingRig.execute(recipe, rows);
+
+        Assert.assertEquals(1, rows.size());
+        Row resultRow = rows.get(0);
+        Assert.assertEquals((double)expectedTotalBytes, (Double) resultRow.getValue("total_size_bytes"), DELTA);
+        Assert.assertEquals(expectedTotalSeconds, (Double) resultRow.getValue("total_time_sec"), DELTA);
+    }
+
+    @Test
+    public void testAggregationAverageMegabytesMinutes() throws Exception {
+         String[] recipe = new String[] {
+            "aggregate-stats :data_size :response_time avg_size_mb avg_time_min aggregation_type:'average' size_unit:'MB' time_unit:'m'"
+        };
+        List<Row> rows = createSampleRows();
+        long totalBytes = calculateExpectedTotalBytes();
+        long totalNanos = calculateExpectedTotalNanos();
+        long rowCount = 4; // Number of valid rows in createSampleRows()
+
+        double expectedAverageBytes = (double) totalBytes / rowCount;
+        double expectedAverageNanos = (double) totalNanos / rowCount;
+
+        double expectedAverageMB = expectedAverageBytes / (1024.0 * 1024.0);
+        double expectedAverageMinutes = expectedAverageNanos / (60.0 * 1_000_000_000.0);
+
+        rows = TestingRig.execute(recipe, rows);
+
+        Assert.assertEquals(1, rows.size());
+        Row resultRow = rows.get(0);
+        Assert.assertEquals(expectedAverageMB, (Double) resultRow.getValue("avg_size_mb"), DELTA);
+        Assert.assertEquals(expectedAverageMinutes, (Double) resultRow.getValue("avg_time_min"), DELTA);
+    }
+
+     @Test
+    public void testAggregationTotalGigabytesHours() throws Exception {
+         String[] recipe = new String[] {
+            "aggregate-stats :data_size :response_time total_size_gb total_time_hr aggregation_type:'total' size_unit:'GB' time_unit:'h'"
+        };
+        List<Row> rows = createSampleRows();
+        long totalBytes = calculateExpectedTotalBytes();
+        long totalNanos = calculateExpectedTotalNanos();
+
+        double expectedTotalGB = (double) totalBytes / (1024.0 * 1024.0 * 1024.0);
+        double expectedTotalHours = (double) totalNanos / (60.0 * 60.0 * 1_000_000_000.0);
+
+        rows = TestingRig.execute(recipe, rows);
+
+        Assert.assertEquals(1, rows.size());
+        Row resultRow = rows.get(0);
+        Assert.assertEquals(expectedTotalGB, (Double) resultRow.getValue("total_size_gb"), DELTA);
+        Assert.assertEquals(expectedTotalHours, (Double) resultRow.getValue("total_time_hr"), DELTA);
+    }
+
+    // --- Helper Methods --- 
+
+    private List<Row> createSampleRows() {
+         // Contains 4 valid rows for aggregation
+         return Arrays.asList(
+            new Row("id", 1).add("data_size", "10KB").add("response_time", "150ms"),
+            new Row("id", 2).add("data_size", "2.5MB").add("response_time", "1.2s"),
+            new Row("id", 3).add("data_size", "512KB").add("response_time", "50ms"),
+            new Row("id", 4).add("data_size", "1GB").add("response_time", "0.1s")
+        );
+    }
+
+    private long calculateExpectedTotalBytes() {
+        return (10L * 1024L) +                       // 10KB
+               (long)(2.5 * 1024.0 * 1024.0) +       // 2.5MB
+               (512L * 1024L) +                      // 512KB
+               (1L * 1024L * 1024L * 1024L);         // 1GB
+    }
+
+     private long calculateExpectedTotalNanos() {
+        return (150L * 1_000_000L) +                 // 150ms
+               (long)(1.2 * 1_000_000_000L) +       // 1.2s
+               (50L * 1_000_000L) +                  // 50ms
+               (long)(0.1 * 1_000_000_000L);         // 0.1s
+    }
+
+    private double calculateExpectedTotalSeconds() {
+        return (double) calculateExpectedTotalNanos() / 1_000_000_000.0;
+    }
 
 } 
